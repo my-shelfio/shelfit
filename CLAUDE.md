@@ -29,7 +29,7 @@ npx vitest run packages/expo-shelfit/test/features/list/format.test.mjs  # a sin
 
 CI (`.github/workflows/ci.yml`) runs on Node 22 and 24, in this order: `npm run lint`, `npm test --workspaces --if-present`, `npm pack --dry-run` for expo-shelfit, then two smoke tests (`--help` exits 0, missing `EXPO_TOKEN` exits 1). Match this locally before opening a PR.
 
-A separate weekly workflow (`.github/workflows/api-canary.yml`) runs the CLI against the *live* EAS API for every display mode, since the EAS GraphQL API is unofficial/undocumented and can change without notice — it files a GitHub issue on failure.
+A separate weekly workflow (`.github/workflows/api-canary.yml`) runs the CLI against the *live* EAS API for every display mode, since the EAS GraphQL API is unofficial/undocumented and can change without notice — it files a GitHub issue on failure. Each step also asserts the table it got back, because the CLI degrades an unreadable value to `-` rather than erroring: a broken field usually surfaces as a column of `-` on an otherwise green run, not as a non-zero exit.
 
 ## Branching & release process
 

@@ -3,6 +3,21 @@ name: API Canary
 # The EAS GraphQL API this CLI depends on is unofficial and unversioned, so
 # field names can change without notice. This runs weekly against the real
 # API so a break is caught here first, not by a user's bug report.
+#
+# Running each display mode is not enough on its own. The CLI degrades a
+# value it cannot read to "-" and keeps going, so an API change usually
+# arrives as a column that is entirely "-" rather than as an error — that is
+# how a platform-name comparison that had stopped matching emptied the UPDATE
+# column for every row while every step here still exited 0. Each step
+# therefore also asserts that the table came back with rows and that the
+# columns the step exists to cover are not entirely "-".
+#
+# Those assertions assume the account behind EXPO_TOKEN keeps: at least one
+# app with builds, at least one submitted build, at least one published
+# update, at least one iOS build, more than one build for some app x
+# platform, builds inside the last three months, and a readable subscription.
+# When the canary account stops satisfying one of those, loosen that step's
+# `cols` rather than dropping the step.
 
 on:
   schedule:
@@ -16,6 +31,58 @@ permissions:
 jobs:
   canary:
     runs-on: ubuntu-latest
+
+    env:
+      # Reads a rendered table and reports every problem it finds, one line
+      # each, before exiting non-zero: the table came back with no rows, a
+      # column in `cols` is entirely "-", a cell of `only`'s column holds
+      # something else, or no `repeat` combination appears on two rows.
+      #
+      # Column positions come from the table's own header row rather than
+      # being hard-coded, so adding or reordering a column doesn't quietly
+      # move an assertion onto the wrong one — a name that isn't in the
+      # header is reported instead.
+      ASSERT_TABLE: |
+        BEGIN { ncols = split(cols, want, ","); nrep = split(repeat, rep, ",") }
+        /^│/ {
+          if (!header) {
+            for (i = 2; i < NF; i++) { name = $i; gsub(/^ +| +$/, "", name); at[name] = i }
+            header = 1
+            next
+          }
+          rows++
+          for (k = 1; k <= ncols; k++) if (cell(want[k]) != "-") filled[want[k]] = 1
+          if (only != "") { split(only, o, "="); if (cell(o[1]) != o[2]) offending[cell(o[1])] = 1 }
+          if (nrep) {
+            key = ""
+            for (k = 1; k <= nrep; k++) key = key SUBSEP cell(rep[k])
+            if (++seen[key] > 1) repeated = 1
+          }
+        }
+        END {
+          if (rows < 1) { note("the table came back with no rows"); exit 1 }
+          for (k = 1; k <= ncols; k++) {
+            if (!(want[k] in at)) note("no " want[k] " column in the table")
+            else if (!(want[k] in filled)) note("every " want[k] " cell is \"-\"")
+          }
+          if (only != "") {
+            split(only, o, "=")
+            for (v in offending) note("a " o[1] " cell reads \"" v "\", not \"" o[2] "\"")
+          }
+          if (nrep && !repeated) note("no " repeat " combination appears on more than one row")
+          exit failed
+        }
+        function cell(name,   v) {
+          if (!(name in at)) return "-"
+          v = $(at[name])
+          gsub(/^ +| +$/, "", v)
+          return v
+        }
+        function note(msg) { print step ": " msg; failed = 1 }
+
+    # `shell: bash` on every step below is load-bearing: it turns on
+    # pipefail, without which `cli | tee` and `awk | tee` would report the
+    # exit status of tee and hide the failure this workflow exists to catch.
     steps:
       - uses: actions/checkout@v7
 
@@ -25,9 +92,15 @@ jobs:
 
       # The default app list's AppOverview query aliases `submissions`/
       # `updateGroups` alongside `builds` in the same app.byId request, so
-      # this one step already covers all three (BUILD/SUBMIT/UPDATE).
+      # this one step already covers all three (BUILD/SUBMIT/UPDATE) — and
+      # the assertion is what tells apart "nothing submitted or published
+      # yet" from "the sub-selection stopped resolving".
       - name: Run against the live EAS API
-        run: node packages/expo-shelfit/bin/cli.mjs
+        shell: bash
+        run: |
+          node packages/expo-shelfit/bin/cli.mjs | tee canary-list.txt
+          awk -F'│' -v step='default app list' -v cols='VERSION,BUILD,SUBMIT,UPDATE' \
+            "$ASSERT_TABLE" canary-list.txt | tee -a assert-failures.txt
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
@@ -36,8 +109,14 @@ jobs:
       # buckets client-side by UTC calendar month + status (success/errored/
       # canceled). Separate step so a break in that pagination shape is
       # distinguishable from a break in the plain app/build queries above.
+      # BUILD MINUTES is asserted separately from TOTAL because it comes
+      # from `metrics.buildDuration`, a different field on the same build.
       - name: Run --stats against the live EAS API
-        run: node packages/expo-shelfit/bin/cli.mjs --stats
+        shell: bash
+        run: |
+          node packages/expo-shelfit/bin/cli.mjs --stats | tee canary-stats.txt
+          awk -F'│' -v step='--stats' -v cols='TOTAL,BUILD MINUTES' \
+            "$ASSERT_TABLE" canary-stats.txt | tee -a assert-failures.txt
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
@@ -45,33 +124,54 @@ jobs:
       # than changing query shape, but a separate step still catches an
       # unexpected error/timeout from the deeper paging on its own.
       - name: Run --stats --month 6 against the live EAS API
-        run: node packages/expo-shelfit/bin/cli.mjs --stats --month 6
+        shell: bash
+        run: |
+          node packages/expo-shelfit/bin/cli.mjs --stats --month 6 | tee canary-stats-6.txt
+          awk -F'│' -v step='--stats --month 6' -v cols='TOTAL' \
+            "$ASSERT_TABLE" canary-stats-6.txt | tee -a assert-failures.txt
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       # AppOverview's builds aliases take a $limit variable for --history; a
       # separate step so a break in that variable/shape is distinguishable
-      # from a break in the plain (limit: 1) query above.
+      # from a break in the plain (limit: 1) query above. `repeat` is what
+      # actually checks the variable arrived: with it ignored, every app
+      # would collapse back to one row per platform.
       - name: Run --history against the live EAS API
-        run: node packages/expo-shelfit/bin/cli.mjs --history 5
+        shell: bash
+        run: |
+          node packages/expo-shelfit/bin/cli.mjs --history 5 | tee canary-history.txt
+          awk -F'│' -v step='--history 5' -v cols='VERSION,BUILD' -v repeat='APP,PLATFORM' \
+            "$ASSERT_TABLE" canary-history.txt | tee -a assert-failures.txt
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       # --members queries `subscription`/`ownerUserActor`/`membersPaginated`
       # on their own, without `billingPeriod`/`usageMetrics` — a separate
       # step so a break here is distinguishable from a break in --stats'
-      # larger query above.
+      # larger query above. PLAN is billing-scoped, so asserting it also
+      # covers the token losing billing permission, which otherwise reads
+      # as an ordinary degraded row.
       - name: Run --members against the live EAS API
-        run: node packages/expo-shelfit/bin/cli.mjs --members
+        shell: bash
+        run: |
+          node packages/expo-shelfit/bin/cli.mjs --members | tee canary-members.txt
+          awk -F'│' -v step='--members' -v cols='MEMBER,ROLE,PLAN' \
+            "$ASSERT_TABLE" canary-members.txt | tee -a assert-failures.txt
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       # --platform narrows AppOverview/BuildsPage to a single platform's
       # aliases instead of always requesting both — a separate step so a
       # break in that single-platform query shape is distinguishable from a
-      # break in the always-both queries above.
+      # break in the always-both queries above. `only` is what checks the
+      # narrowing itself: an unfiltered query would put android rows here.
       - name: Run --platform ios against the live EAS API
-        run: node packages/expo-shelfit/bin/cli.mjs --platform ios
+        shell: bash
+        run: |
+          node packages/expo-shelfit/bin/cli.mjs --platform ios | tee canary-ios.txt
+          awk -F'│' -v step='--platform ios' -v cols='VERSION,BUILD' -v only='PLATFORM=ios' \
+            "$ASSERT_TABLE" canary-ios.txt | tee -a assert-failures.txt
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
@@ -80,8 +180,19 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
+            const fs = require('fs');
             const today = new Date().toISOString().slice(0, 10);
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            // Absent when the CLI itself errored or timed out, since no
+            // assertion got as far as running.
+            let failures = '';
+            try {
+              failures = fs.readFileSync('assert-failures.txt', 'utf8').trim();
+            } catch {}
+            const detail = failures
+              ? `The assertions that failed:\n\n\`\`\`\n${failures}\n\`\`\`\n\n`
+              : 'No assertion reported a failure, so the CLI errored or timed out before ' +
+                'a table could be checked.\n\n';
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -89,6 +200,7 @@ jobs:
               body:
                 'The weekly EAS API canary run failed. This usually means the ' +
                 'unofficial EAS GraphQL API changed a field the CLI depends on.\n\n' +
+                detail +
                 `See the [failed run](${runUrl}) for details.`,
               labels: ['bug'],
             });
