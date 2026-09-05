@@ -21,7 +21,9 @@ export async function runStats(client, accounts, opts, accountDisplayNames, now 
   const subjectCount = `${groupCount} ${byApp ? 'app(s)' : 'account(s)'}`;
 
   console.log(
-    renderTable([subjectHeader, 'PERIOD', 'PLATFORM', ...statsBuildsHeaders()], displayRows)
+    renderTable([subjectHeader, 'PERIOD', 'PLATFORM', ...statsBuildsHeaders()], displayRows, {
+      maxWidth: opts.maxWidth,
+    })
   );
   const metricsNote =
     metricsMissingCount > 0

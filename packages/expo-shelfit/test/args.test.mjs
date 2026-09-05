@@ -14,6 +14,7 @@ const DEFAULTS = {
   app: null,
   groupBy: null,
   local: false,
+  maxWidth: null,
   warnings: [],
 };
 
@@ -68,6 +69,12 @@ describe('parseArgs', () => {
       ['--local', '--account', 'myorg', '--app', 'storefront'],
       { local: true, account: 'myorg', app: 'storefront' },
     ],
+    [['--max-width', '100'], { maxWidth: 100 }],
+    [['--max-width=80'], { maxWidth: 80 }],
+    [['--max-width', '1'], { maxWidth: 1 }], // at the minimum
+    [['--max-width', '10000'], { maxWidth: 10000 }], // no upper bound
+    [['--max-width', '80', '--stats'], { maxWidth: 80, stats: true }],
+    [['--max-width', '80', '--members'], { maxWidth: 80, members: true }],
   ])('parses %j', (argv, expected) => {
     expect(parseArgs(argv)).toEqual({ ...DEFAULTS, ...expected });
   });
@@ -84,6 +91,11 @@ describe('parseArgs', () => {
     [['--csv'], /Unknown option: --csv/],
     [['--platform', 'windows'], /Invalid --platform value/],
     [['--platform'], /--platform requires a value/],
+    [['--max-width'], /--max-width requires a value/],
+    [['--max-width', 'abc'], /Invalid --max-width value/],
+    [['--max-width', '0'], /Invalid --max-width value/],
+    [['--max-width', '-1'], /Invalid --max-width value/],
+    [['--max-width', '2.5'], /Invalid --max-width value/],
     [['--history'], /--history requires a value/],
     [['--history', 'abc'], /Invalid --history value/],
     [['--history', '0'], /Invalid --history value/],

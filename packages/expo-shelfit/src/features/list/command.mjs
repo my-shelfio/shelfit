@@ -23,7 +23,8 @@ export async function runList(client, accounts, opts, accountDisplayNames) {
         dateColumnHeader('SUBMIT', opts.local),
         dateColumnHeader('UPDATE', opts.local),
       ],
-      toDisplayRows(filtered, { accountDisplayNames, local: opts.local })
+      toDisplayRows(filtered, { accountDisplayNames, local: opts.local }),
+      { maxWidth: opts.maxWidth }
     )
   );
   // `--history 1` must read identically to passing no flag at all — same

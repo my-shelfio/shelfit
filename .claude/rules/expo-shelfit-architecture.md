@@ -53,6 +53,10 @@ flowchart LR
 
 **`--local` switches which calendar day BUILD/SUBMIT/UPDATE fall on** (`src/shared/dates.mjs#formatBuildDate`, called with `{ time: false }` for all three — the default list no longer shows time-of-day at all). All three columns share one date formatter, so `--local` shifts all three together, never just one. Every UTC boundary (`calendarMonths`, `inclusiveEnd`, `isoDate`) stays UTC unconditionally, since `--stats`'s month bucketing compares them directly against build `createdAt`. Incompatible with `--stats`/`--members`, neither of which has a date column `--local` affects.
 
+**`--max-width <n>` fits the table into a fixed number of terminal columns** (`src/shared/terminal/render.mjs#fitWidths`), taking one column at a time off whichever column is currently widest until it fits, and never below a column's own header — a column narrower than its header no longer says what it holds. `truncate` and `width` walk the same cluster iterator, so a cell is never measured one way and cut another, and a cut never lands inside a wide character or a ZWJ-joined sequence. It applies to every display mode, since all three render through the same `renderTable`.
+
+It is **off by default rather than following `process.stdout.columns`**: the table is the only output this CLI has, so shortening cells that fit today would silently change what every existing invocation prints. There is also no upper bound and no error for a value below the table's own minimum — a caller passing `$COLUMNS` shouldn't have to know a cap, and a too-small number shrinks as far as the headers allow and stops.
+
 **How data is fetched** — all against `https://api.expo.dev/graphql`, concurrency-limited to 8 via `createSemaphore`/`mapWithConcurrency` in `src/shared/concurrency.mjs`:
 
 ```mermaid

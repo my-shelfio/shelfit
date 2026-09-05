@@ -69,6 +69,9 @@ export const HELP = `
                              calendar day they fall on. --stats' PERIOD and --members'
                              TRIAL END stay UTC. Cannot be combined with --stats or
                              --members (neither has a date column --local affects).
+    --max-width <n>         Fit the table into <n> terminal columns, shortening the
+                             widest cells with an ellipsis. Off by default: the table
+                             is as wide as its content. Applies to every display mode.
 
   Deprecated
     --usage                 Old name for --stats. Still works, prints a warning on
@@ -97,6 +100,7 @@ export function parseArgs(argv) {
     app: null,
     groupBy: null,
     local: false,
+    maxWidth: null,
     // Collected rather than printed, so parseArgs stays I/O-free for the same
     // reason src/* never calls process.exit.
     warnings: [],
@@ -148,6 +152,10 @@ export function parseArgs(argv) {
       opts.groupBy = requireValue(argv, ++i, '--group-by');
     } else if (arg.startsWith('--group-by=')) {
       opts.groupBy = arg.slice('--group-by='.length);
+    } else if (arg === '--max-width') {
+      opts.maxWidth = requireValue(argv, ++i, '--max-width');
+    } else if (arg.startsWith('--max-width=')) {
+      opts.maxWidth = arg.slice('--max-width='.length);
     } else if (arg === '--local') {
       opts.local = true;
     } else {
@@ -210,6 +218,21 @@ export function parseArgs(argv) {
       );
     }
     opts.groupBy = normalized;
+  }
+
+  // No upper bound: the point is to match a specific terminal, and a caller
+  // passing $COLUMNS shouldn't have to know a cap. A value under the table's
+  // own minimum isn't an error either — render.mjs#fitWidths shrinks as far
+  // as the headers allow and stops, so a too-small number is honored as far
+  // as it can be rather than rejected.
+  if (opts.maxWidth !== null) {
+    const parsed = Number(opts.maxWidth);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new CliError(
+        `Invalid --max-width value: "${opts.maxWidth}". Expected an integer of 1 or more.`
+      );
+    }
+    opts.maxWidth = parsed;
   }
 
   // Order here decides which pair gets reported first when 3 are set at once.
