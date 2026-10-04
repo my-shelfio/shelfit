@@ -66,6 +66,9 @@ npx @my-shelfio/expo-shelfit --app storefront
 # BUILD/SUBMIT/UPDATE の日付をローカル暦日で表示
 npx @my-shelfio/expo-shelfit --local
 
+# 表を指定した端末幅に収める
+npx @my-shelfio/expo-shelfit --max-width 120
+
 # ビルド履歴
 npx @my-shelfio/expo-shelfit --history 5
 

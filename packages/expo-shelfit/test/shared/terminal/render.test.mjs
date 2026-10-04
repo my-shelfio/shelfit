@@ -5,9 +5,13 @@ import {
   pad,
   red,
   renderTable,
+  truncate,
   width,
   yellow,
 } from '../../../src/shared/terminal/render.mjs';
+
+// The width of a rendered table's widest line, which every line shares.
+const tableWidth = (out) => Math.max(...out.split('\n').map(width));
 
 describe('width', () => {
   it('counts ASCII as 1 column each', () => {
@@ -36,6 +40,37 @@ describe('width', () => {
 
   it('counts a variation-selector character the same as its base character', () => {
     expect(width('⚠️')).toBe(width('⚠'));
+  });
+});
+
+describe('truncate', () => {
+  it('returns the string untouched when it already fits', () => {
+    expect(truncate('abc', 3)).toBe('abc');
+    expect(truncate('日本', 4)).toBe('日本');
+  });
+
+  it('spends one column of the budget on the ellipsis', () => {
+    expect(truncate('abcdef', 4)).toBe('abc\u2026');
+    expect(width(truncate('abcdef', 4))).toBe(4);
+  });
+
+  it('never leaves half a wide character behind', () => {
+    // Two columns per character, so an odd budget cannot be filled exactly —
+    // the result must come in under it rather than split one.
+    expect(truncate('日本語', 4)).toBe('日\u2026');
+    expect(truncate('日本語', 5)).toBe('日本\u2026');
+  });
+
+  it('keeps a ZWJ-joined sequence whole', () => {
+    expect(truncate('a👨‍👩‍👧b', 3)).toBe('a\u2026');
+  });
+
+  it('keeps a variation selector with the character it modifies', () => {
+    expect(truncate('⚠️x', 1)).toBe('\u2026');
+  });
+
+  it.each([0, -1])('returns an empty string for a budget of %i', (maxWidth) => {
+    expect(truncate('abc', maxWidth)).toBe('');
   });
 });
 
@@ -103,5 +138,42 @@ describe('renderTable', () => {
   it('does not throw RangeError on a large number of rows', () => {
     const rows = Array.from({ length: 200_000 }, (_, i) => [String(i)]);
     expect(() => renderTable(['A'], rows, { isTTY: false })).not.toThrow();
+  });
+
+  it('is unchanged by an unset maxWidth, however wide the content', () => {
+    const headers = ['ACCOUNT', 'APP'];
+    const rows = [['myorg', 'a'.repeat(120)]];
+    expect(renderTable(headers, rows, { isTTY: false })).toBe(
+      renderTable(headers, rows, { isTTY: false, maxWidth: null })
+    );
+  });
+
+  it('fits the table into maxWidth', () => {
+    const out = renderTable(['ACCOUNT', 'APP'], [['myorg', 'a'.repeat(120)]], {
+      isTTY: false,
+      maxWidth: 40,
+    });
+    expect(tableWidth(out)).toBeLessThanOrEqual(40);
+    expect(out).toContain('\u2026');
+  });
+
+  it('takes the columns off the widest column, leaving narrower ones intact', () => {
+    const out = renderTable(['ACCOUNT', 'APP'], [['myorg', 'a'.repeat(120)]], {
+      isTTY: false,
+      maxWidth: 40,
+    });
+    expect(out).toContain('myorg');
+  });
+
+  it('stops at the header widths rather than hiding what a column holds', () => {
+    const headers = ['ACCOUNT', 'APP'];
+    const out = renderTable(headers, [['myorg', 'storefront']], { isTTY: false, maxWidth: 1 });
+    for (const header of headers) expect(out).toContain(header);
+  });
+
+  it('keeps every line the same width when a wide character cannot be split', () => {
+    const out = renderTable(['APP'], [['日本語アプリ']], { isTTY: false, maxWidth: 10 });
+    const lineWidths = new Set(out.split('\n').map(width));
+    expect(lineWidths.size).toBe(1);
   });
 });

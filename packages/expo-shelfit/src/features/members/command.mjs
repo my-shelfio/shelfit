@@ -21,7 +21,8 @@ export async function runMembers(client, accounts, opts, accountDisplayNames) {
         membersConcurrencyHeader(opts.platform),
         'TRIAL END',
       ],
-      toMembersDisplayRows(entries, { platform: opts.platform, accountDisplayNames })
+      toMembersDisplayRows(entries, { platform: opts.platform, accountDisplayNames }),
+      { maxWidth: opts.maxWidth }
     )
   );
   console.log(

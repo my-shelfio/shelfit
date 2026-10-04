@@ -66,6 +66,9 @@ npx @my-shelfio/expo-shelfit --app storefront
 # Local calendar day for BUILD/SUBMIT/UPDATE dates
 npx @my-shelfio/expo-shelfit --local
 
+# Fit the table into a fixed number of terminal columns
+npx @my-shelfio/expo-shelfit --max-width 120
+
 # Build history
 npx @my-shelfio/expo-shelfit --history 5
 
